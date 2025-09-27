@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TinyDungeon Game + Map Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+    <script src="DungeOnionplayerclasses.js"></script>
+    <script src="DungeOniontilelogic.js"></script>
+    <script src="DungeOnionenemies.js"></script>
+    <script src="DungeOnioninnerworking.js"></script>
+    <link rel="stylesheet" href="TINYDUNGEONui.css">
+</head>
+<body>
+    <!-- Mode Toggle -->
+    <div id="mode-toggle">
+        <button type="button" id="game-mode-btn" class="mode-button active">Game Mode</button>
+        <button type="button" id="editor-mode-btn" class="mode-button">Editor Mode</button>
+    </div>
+
+    <div id="game-mode">
+        <div id="gameContainer">
+            <canvas id="gameCanvas"></canvas>
+            <div id="loadingScreen">Loading...</div>
+            <div id="gameInfo">
+                <div>Use WASD or Arrow Keys to move</div>
+                <div>Left-click to shoot at mouse cursor</div>
+                <div>Round: <span id="roundNumber">1</span></div>
+                <div>Score: <span id="playerScore">0</span></div>
+                <div>Enemies: <span id="enemyCount">0</span></div>
+                <div id="shop">
+                    <button id="expandMapBtn" type="button">Expand Map (Cost: 500)</button>
+                </div>
+            </div>
+            <div id="roundMessage"></div>
+            <div id="healthBarContainer"></div>
+        </div>
+    </div>
+
+    <!-- Editor Mode -->
+    <div id="editor-mode">
+        <div id="controls">
+            <h3>TinyDungeon Editor</h3>
+            
+            <div class="control-group">
+                <h4>Tools</h4>
+                <button type="button" id="draw-tool" class="tool-button active">Draw (D)</button>
+                <button type="button" id="erase-tool" class="tool-button">Erase (E)</button>
+                <button type="button" id="pan-tool" class="tool-button">Pan (P)</button>
+            </div>
+
+            <div class="control-group">
+                <h4>Map Actions</h4>
+                <button type="button" id="clear-map-btn" class="control-button">Clear Map</button>
+                <button type="button" id="save-map-btn" class="control-button">Save Map (JSON)</button>
+                <label for="load-map-input" class="control-button">Load Map (JSON)</label>
+                <input type="file" id="load-map-input" accept=".json">
+                <button type="button" id="load-game-map-btn" class="control-button">Load Current Game Map</button>
+                <button type="button" id="save-to-game-btn" class="control-button">Save to Game</button>
+            </div>
+
+            <div class="control-group">
+                <h4>View</h4>
+                <button type="button" id="toggle-grid-btn" class="control-button">Toggle Grid (G)</button>
+            </div>
+            
+            <div class="control-group">
+                <h4>Tile Palette</h4>
+                <div id="palette-container">
+                    <!-- p5.js will create a canvas here for the palette -->
+                </div>
+            </div>
+            <div id="status-bar">
+                Loading...
+            </div>
+        </div>
+
+        <div id="canvas-container">
+            <!-- p5.js will create the main map canvas here -->
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const SPRITESHEET_PATH = './tilemap.png';
+        const TILE_SIZE = 16;
+        const TILE_SPACING = 1;
+        const GRID_COLS = 32; // Match game map size
+        const GRID_ROWS = 20; // Match game map size
+        const PALETTE_COLS = 16;
+        const PALETTE_TILE_DISPLAY_SIZE = 32;
+
+        // --- GLOBAL VARIABLES ---
+        let currentMode = 'game'; // 'game' or 'editor'
+        let spritesheetImage;
+        let tiles = [];
+        let gameMapData = []; // For game mode
+        let editorMapData = []; // For editor mode
+        
+        // Game variables
+        let gameManager = null;
+        let atlasManager = null;
+        let inputManager = null;
+        let healthBarManager = null;
+        let particleManager = null;
+        let tileManager = null; // New TileManager instance
+        let mapManager = null; // New MapManager instance
+        
+        // Editor variables
+        let selectedTileIndex = -1;
+        let currentTool = 'draw';
+        let showGrid = true;
+        let cameraX = 0;
+        let cameraY = 0;
+        let isPanning = false;
+        let lastPanMouseX, lastPanMouseY;
+        let currentMouseCol = -1;
+        let currentMouseRow = -1;
+        let mainSketchInstance;
+        let paletteSketchInstance;
+
+        // --- EDITOR FUNCTIONS ---
+        function initializeEditorMapData() {
+            editorMapData = [];
+            for (let r = 0; r < GRID_ROWS; r++) {
+                editorMapData[r] = [];
+                for (let c = 0; c < GRID_COLS; c++) {
+                    editorMapData[r][c] = [];
+                }
+            }
+        }
+
+        function extractAndPrepareTiles() {
+            if (!spritesheetImage || !spritesheetImage.width || !spritesheetImage.height) {
+                console.error("Spritesheet not loaded when trying to extract tiles.");
+                return false;
+            }
+            
+            tiles = [];
+            const tileAndSpaceWidth = TILE_SIZE + TILE_SPACING;
+            const tileAndSpaceHeight = TILE_SIZE + TILE_SPACING;
+            const sheetTilesWide = Math.floor((spritesheetImage.width + TILE_SPACING) / tileAndSpaceWidth);
+            const sheetTilesHigh = Math.floor((spritesheetImage.height + TILE_SPACING) / tileAndSpaceHeight);
+            
+            let currentTileGlobalIndex = 0;
+            for (let y = 0; y < sheetTilesHigh; y++) {
+                for (let x = 0; x < sheetTilesWide; x++) {
+                    let sx = x * tileAndSpaceWidth;
+                    let sy = y * tileAndSpaceHeight;
+                    
+                    if (sx + TILE_SIZE <= spritesheetImage.width && sy + TILE_SIZE <= spritesheetImage.height) {
+                        let tileImg = spritesheetImage.get(sx, sy, TILE_SIZE, TILE_SIZE);
+                        let properties = tileManager.getProperties(currentTileGlobalIndex);
+                        
+                        if (!properties.hasOwnProperty('tileIndex')) {
+                            properties.tileIndex = currentTileGlobalIndex;
+                        }
+
+                        tiles.push({ image: tileImg, properties: properties, index: currentTileGlobalIndex });
+                        currentTileGlobalIndex++;
+                    }
+                }
+            }
+            
+            console.log(`Extracted ${tiles.length} tiles with properties.`);
+            return tiles.length > 0;
+        }
+
+        // --- MAIN SKETCH (EDITOR) ---
+        const s_main = (p) => {
+            mainSketchInstance = p;
+            
+            p.preload = () => {
+                spritesheetImage = p.loadImage(SPRITESHEET_PATH, 
+                    () => {
+                        console.log("Spritesheet loaded successfully.");
+                    },
+                    (err) => {
+                        console.error(`Error loading spritesheet: ${SPRITESHEET_PATH}`, err);
+                    }
+                );
+            };
+
+            p.setup = () => {
+                const container = document.getElementById('canvas-container');
+                const w = container.clientWidth;
+                const h = container.clientHeight;
+                canvas = p.createCanvas(w, h, p.WEBGL);
+                canvas.id('main-canvas');
+                canvas.parent('canvas-container');
+                p.background(30, 39, 46);
+                p.noSmooth();
+                
+                canvas.mouseWheel(e => {
+                    if (e.delta > 0) {
+                        cameraX += 10;
+                    } else {
+                        cameraX -= 10;
+                    }
+                });
+                
+                p.noLoop(); // Only redraw when needed
+            };
+
+            p.draw = () => {
+                if (currentMode !== 'editor') return;
+                
+                p.clear();
+                p.background(30, 39, 46);
+                p.push();
+                p.translate(-p.width / 2, -p.height / 2); // Adjust for WEBGL coords
+                p.translate(cameraX, cameraY);
+
+                const mapWidth = GRID_COLS * TILE_SIZE;
+                const mapHeight = GRID_ROWS * TILE_SIZE;
+
+                // Draw the grid
+                if (showGrid) {
+                    p.stroke(255, 255, 255, 50);
+                    p.strokeWeight(1);
+                    for (let i = 0; i <= GRID_COLS; i++) {
+                        p.line(i * TILE_SIZE, 0, i * TILE_SIZE, mapHeight);
+                    }
+                    for (let i = 0; i <= GRID_ROWS; i++) {
+                        p.line(0, i * TILE_SIZE, mapWidth, i * TILE_SIZE);
+                    }
+                }
+
+                // Draw the map
+                for (let r = 0; r < GRID_ROWS; r++) {
+                    for (let c = 0; c < GRID_COLS; c++) {
+                        if (editorMapData[r] && editorMapData[r][c]) {
+                            editorMapData[r][c].forEach(tileIdx => {
+                                if (tileIdx >= 0 && tileIdx < tiles.length) {
+                                    p.image(tiles[tileIdx].image, c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                                }
+                            });
+                        }
+                    }
+                }
+
+                // Highlight the current tile under the mouse
+                let worldMouseX = p.mouseX - cameraX;
+                let worldMouseY = p.mouseY - cameraY;
+                currentMouseCol = Math.floor(worldMouseX / TILE_SIZE);
+                currentMouseRow = Math.floor(worldMouseY / TILE_SIZE);
+
+                if (currentTool === 'draw' && selectedTileIndex !== -1 && 
+                    currentMouseCol >= 0 && currentMouseCol < GRID_COLS &&
+                    currentMouseRow >= 0 && currentMouseRow < GRID_ROWS &&
+                    p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
+                    p.tint(255, 180);
+                    if (tiles[selectedTileIndex]) {
+                         p.image(tiles[selectedTileIndex].image, currentMouseCol * TILE_SIZE, currentMouseRow * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
+                    p.noTint();
+                } else if (currentTool === 'erase' &&
+                    currentMouseCol >= 0 && currentMouseCol < GRID_COLS &&
+                    currentMouseRow >= 0 && currentMouseRow < GRID_ROWS &&
+                    p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
+                    p.fill(255, 0, 0, 100);
+                    p.noStroke();
+                    p.rect(currentMouseCol * TILE_SIZE, currentMouseRow * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
+                p.pop();
+            };
+
+            p.mousePressed = () => {
+                if (currentMode !== 'editor') return;
+                if (p.mouseX < 0 || p.mouseX > p.width || p.mouseY < 0 || p.mouseY > p.height) {
+                    return;
+                }
+
+                let worldMouseX = p.mouseX - cameraX;
+                let worldMouseY = p.mouseY - cameraY;
+                let col = Math.floor(worldMouseX / TILE_SIZE);
+                let row = Math.floor(worldMouseY / TILE_SIZE);
+
+                if (currentTool === 'pan') {
+                    isPanning = true;
+                    lastPanMouseX = p.mouseX;
+                    lastPanMouseY = p.mouseY;
+                } else if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS) {
+                    if (currentTool === 'draw' && selectedTileIndex !== -1) {
+                        if (!editorMapData[row][col].includes(selectedTileIndex)) {
+                             editorMapData[row][col].push(selectedTileIndex);
+                        } else {
+                             editorMapData[row][col].push(selectedTileIndex);
+                        }
+                    } else if (currentTool === 'erase') {
+                        if (editorMapData[row][col].length > 0) {
+                            editorMapData[row][col].pop();
+                        }
+                    }
+                }
+            };
+
+            p.mouseDragged = () => {
+                if (currentMode !== 'editor') return;
+                if (p.mouseX < 0 || p.mouseX > p.width || p.mouseY < 0 || p.mouseY > p.height) {
+                    if(isPanning) isPanning = false;
+                    return;
+                }
+
+                let worldMouseX = p.mouseX - cameraX;
+                let worldMouseY = p.mouseY - cameraY;
+                let col = Math.floor(worldMouseX / TILE_SIZE);
+                let row = Math.floor(worldMouseY / TILE_SIZE);
+
+                if (isPanning) {
+                    let dx = p.mouseX - lastPanMouseX;
+                    let dy = p.mouseY - lastPanMouseY;
+                    cameraX += dx;
+                    cameraY += dy;
+                    lastPanMouseX = p.mouseX;
+                    lastPanMouseY = p.mouseY;
+                } else if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS) {
+                    if (currentTool === 'draw' && selectedTileIndex !== -1) {
+                         if (!editorMapData[row][col].includes(selectedTileIndex)) {
+                             editorMapData[row][col].push(selectedTileIndex);
+                        } else {
+                             editorMapData[row][col].push(selectedTileIndex);
+                        }
+                    } else if (currentTool === 'erase') {
+                        if (editorMapData[row][col].length > 0) {
+                            editorMapData[row][col].pop();
+                        }
+                    }
+                }
+            };
+            
+            p.mouseReleased = () => {
+                if (isPanning) {
+                    isPanning = false;
+                }
+            };
+
+            p.windowResized = () => {
+                if (currentMode !== 'editor') return;
+                const container = document.getElementById('canvas-container');
+                const w = container.clientWidth;
+                const h = container.clientHeight;
+                p.resizeCanvas(w, h);
+            };
+        };
+
+        // --- PALETTE SKETCH ---
+        const s_palette = (p) => {
+            paletteSketchInstance = p;
+            let paletteCanvas;
+
+            p.setup = () => {
+                p.setupPaletteCanvas();
+                p.noLoop();
+            };
+            
+            p.setupPaletteCanvas = () => {
+                if (tiles.length === 0) {
+                    let paletteContainer = document.getElementById('palette-container');
+                    let tempPaletteCanvasWidth = PALETTE_COLS * PALETTE_TILE_DISPLAY_SIZE;
+                    if (paletteCanvas) paletteCanvas.remove();
+                    paletteCanvas = p.createCanvas(tempPaletteCanvasWidth, PALETTE_TILE_DISPLAY_SIZE);
+                    paletteCanvas.parent('palette-container');
+                    p.background(50);
+                    p.fill(200);
+                    p.textAlign(p.CENTER, p.CENTER);
+                    p.text("Loading tiles...", tempPaletteCanvasWidth/2, PALETTE_TILE_DISPLAY_SIZE/2);
+                    return;
+                }
+
+                let numPaletteRows = Math.ceil(tiles.length / PALETTE_COLS);
+                let paletteCanvasWidth = PALETTE_COLS * PALETTE_TILE_DISPLAY_SIZE;
+                let paletteCanvasHeight = numPaletteRows * PALETTE_TILE_DISPLAY_SIZE;
+
+                if (paletteCanvas) paletteCanvas.remove();
+                paletteCanvas = p.createCanvas(paletteCanvasWidth, paletteCanvasHeight, p.WEBGL);
+                paletteCanvas.parent('palette-container');
+                p.pixelDensity(1);
+                p.noSmooth();
+                
+                setTimeout(() => p.redraw(), 0); // Redraw once setup is stable
+            };
+
+            p.draw = () => {
+                if (!atlasManager.loaded) return;
+                p.clear();
+                p.background(44, 58, 71);
+                p.translate(-p.width / 2, -p.height / 2); // Adjust for WEBGL coords
+                
+                const tileCount = Object.keys(atlasManager.tiles).length;
+
+                for (let i = 0; i < tileCount; i++) {
+                    let col = i % PALETTE_COLS;
+                    let row = Math.floor(i / PALETTE_COLS);
+                    let x = col * PALETTE_TILE_DISPLAY_SIZE;
+                    let y = row * PALETTE_TILE_DISPLAY_SIZE;
+
+                    p.image(tiles[i].image, x, y, PALETTE_TILE_DISPLAY_SIZE, PALETTE_TILE_DISPLAY_SIZE);
+
+                    if (i === selectedTileIndex) {
+                        p.noFill();
+                        p.stroke(255, 204, 0);
+                        p.strokeWeight(2);
+                        p.rect(x, y, PALETTE_TILE_DISPLAY_SIZE, PALETTE_TILE_DISPLAY_SIZE);
+                    }
+                }
+            };
+
+            p.mousePressed = () => {
+                if (currentMode !== 'editor') return;
+                if (tiles.length === 0) return;
+                let col = Math.floor(p.mouseX / PALETTE_TILE_DISPLAY_SIZE);
+                let row = Math.floor(p.mouseY / PALETTE_TILE_DISPLAY_SIZE);
+                let index = row * PALETTE_COLS + col;
+
+                if (index >= 0 && index < tiles.length) {
+                    selectedTileIndex = index;
+                    currentTool = 'draw';
+                    setActiveButton(document.getElementById('draw-tool'));
+                    updateStatusBar();
+                    p.redraw();
+                }
+            };
+        };
+
+        // --- UI, MODE SWITCHING, & INITIALIZATION ---
+
+        function setActiveButton(button) {
+            document.querySelectorAll('.tool-button').forEach(btn => btn.classList.remove('active'));
+            if (button) {
+                button.classList.add('active');
+            }
+        }
+
+        function updateStatusBar() {
+            const statusBar = document.getElementById('status-bar');
+            if (!statusBar || !mainSketchInstance) return;
+
+            let statusText = `Grid: ${GRID_COLS}x${GRID_ROWS} | Tiles: ${TILE_SIZE}x${TILE_SIZE}<br>`;
+            statusText += `Mouse: (${mainSketchInstance.mouseX}, ${mainSketchInstance.mouseY}) | Cell: (${currentMouseCol}, ${currentMouseRow})<br>`;
+            
+            if (selectedTileIndex !== -1 && tiles[selectedTileIndex]) {
+                const tileInfo = tiles[selectedTileIndex];
+                statusText += `Selected: #${tileInfo.index} - ${tileInfo.properties.description || 'N/A'}<br>`;
+                statusText += `Player Pass: ${tileInfo.properties.playerPasses} | Magic Pass: ${tileInfo.properties.magicPasses}`;
+            } else {
+                statusText += "Selected Tile: None";
+            }
+        }
+
+        async function initializeGameMode() {
+            const gameCanvas = document.getElementById('gameCanvas');
+            if (!gameCanvas) {
+                console.error("Game canvas not found!");
+                return;
+            }
+
+            document.getElementById('loadingScreen').style.display = 'block';
+
+            if (!atlasManager) atlasManager = new AtlasManager();
+            if (!healthBarManager) healthBarManager = new HealthBarManager();
+            if (!particleManager) particleManager = new ParticleManager();
+            if (!tileManager) tileManager = new TileManager();
+            if (!mapManager) mapManager = new MapManager(TILE_SIZE, GRID_COLS, GRID_ROWS, tileManager);
+
+            try {
+                await Promise.all([
+                    atlasManager.loadTileset(SPRITESHEET_PATH),
+                    healthBarManager.loadImages(),
+                    particleManager.loadParticleSampler()
+                ]);
+                
+                inputManager = new InputManager(gameCanvas);
+                // Pass the mapManager instance to the GameManager
+                gameManager = new GameManager(gameCanvas, atlasManager, inputManager, healthBarManager, particleManager, mapManager);
+                
+                document.getElementById('loadingScreen').style.display = 'none';
+                
+                gameManager.lastTime = performance.now();
+                requestAnimationFrame((time) => gameManager.gameLoop(time));
+                
+            } catch (error) {
+                console.error("Failed to initialize game:", error);
+                document.getElementById('loadingScreen').textContent = 'Error loading game assets. Please refresh.';
+            }
+        }
+
+        function initializeEditorMode() {
+            if (mainSketchInstance) {
+                mainSketchInstance.loop();
+                paletteSketchInstance.loop();
+                return; 
+            }
+            
+            new p5(s_main, 'canvas-container');
+            new p5(s_palette, 'palette-container');
+        }
+
+        async function switchToGameMode() {
+            if (currentMode === 'game' && gameManager && gameManager.gameRunning) return;
+            currentMode = 'game';
+            
+            document.getElementById('game-mode').style.display = 'block';
+            document.getElementById('editor-mode').style.display = 'none';
+            document.getElementById('game-mode-btn').classList.add('active');
+            document.getElementById('editor-mode-btn').classList.remove('active');
+
+            if (mainSketchInstance) mainSketchInstance.noLoop();
+            if (paletteSketchInstance) paletteSketchInstance.noLoop();
+
+            if (!gameManager || !gameManager.gameRunning) {
+                await initializeGameMode();
+            } else {
+                gameManager.isPaused = false;
+                gameManager.lastTime = performance.now();
+                requestAnimationFrame((time) => gameManager.gameLoop(time));
+            }
+        }
+
+        function switchToEditorMode() {
+            currentMode = 'editor';
+            
+            document.getElementById('game-mode').style.display = 'none';
+            document.getElementById('editor-mode').style.display = 'block';
+            document.getElementById('game-mode-btn').classList.remove('active');
+            document.getElementById('editor-mode-btn').classList.add('active');
+
+            if (gameManager) {
+                gameManager.isPaused = true;
+            }
+            
+            initializeEditorMode();
+        }
+
+        function loadGameMapToEditor() {
+            if (!gameManager || !gameManager.mapManager) {
+                alert("No game map is currently loaded.");
+                return;
+            }
+            // Update editor's grid dimensions before loading
+            const { mapWidth, mapHeight, gameMapData } = gameManager.mapManager;
+            GRID_COLS = mapWidth;
+            GRID_ROWS = mapHeight;
+            
+            editorMapData = JSON.parse(JSON.stringify(gameMapData)); // Deep copy
+
+            console.log(`Current game map (${mapWidth}x${mapHeight}) loaded into editor.`);
+            if (mainSketchInstance) {
+                mainSketchInstance.loop(); // Redraw editor
+            }
+        }
+
+        function saveEditorMapToGame() {
+            if (!editorMapData || editorMapData.length === 0) {
+                alert("Editor map is empty.");
+                return;
+            }
+            
+            const mapObject = {
+                gridCols: GRID_COLS,
+                gridRows: GRID_ROWS,
+                tileSize: TILE_SIZE,
+                mapData: editorMapData
+            };
+
+            if (gameManager && gameManager.mapManager) {
+                gameManager.mapManager.loadMapFromData(mapObject);
+                gameManager.resetGame();
+                console.log("Editor map saved to game and game reset.");
+            } else {
+                alert("Game not running. Cannot save map to game.");
+            }
+        }
+
+        // --- EVENT LISTENERS ---
+        
+        document.getElementById('game-mode-btn').addEventListener('click', switchToGameMode);
+        document.getElementById('editor-mode-btn').addEventListener('click', switchToEditorMode);
+        document.getElementById('draw-tool').addEventListener('click', () => {
+            currentTool = 'draw';
+            setActiveButton(document.getElementById('draw-tool'));
+        });
+        document.getElementById('erase-tool').addEventListener('click', () => {
+            currentTool = 'erase';
+            setActiveButton(document.getElementById('erase-tool'));
+        });
+        document.getElementById('pan-tool').addEventListener('click', () => {
+            currentTool = 'pan';
+            setActiveButton(document.getElementById('pan-tool'));
+        });
+        document.getElementById('toggle-grid-btn').addEventListener('click', () => {
+            showGrid = !showGrid;
+        });
+        document.getElementById('clear-map-btn').addEventListener('click', () => {
+            if (confirm("Are you sure you want to clear the entire map?")) {
+                initializeEditorMapData();
+            }
+        });
+        document.getElementById('save-map-btn').addEventListener('click', () => {
+            // In a real scenario, you'd want to save the editor's map data.
+            // For now, we'll save the game's current map state via the MapManager.
+            if (!gameManager || !gameManager.mapManager) {
+                alert("Game is not running. Cannot save map.");
+                return;
+            }
+            const mapToSave = gameManager.mapManager.getMapSaveData();
+            const filename = `tinydungeon_map_${Date.now()}.json`;
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(mapToSave, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", filename);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            console.log("Map saved from game state.");
+        });
+        document.getElementById('load-map-input').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const loadedMap = JSON.parse(e.target.result);
+                        // We need to load this into the game's MapManager
+                        if (gameManager && gameManager.mapManager) {
+                            gameManager.mapManager.loadMapFromData(loadedMap);
+                            // Also update the editor's view if we are in editor mode
+                            loadGameMapToEditor(); 
+                            console.log("Map loaded into the game.");
+                        } else {
+                            alert("Game not initialized. Load the map after starting the game.");
+                        }
+                    } catch (error) {
+                        alert("Error parsing map file: " + error.message);
+                        console.error("Error loading map:", error);
+                    }
+                };
+                reader.readAsText(file);
+            }
+            event.target.value = null;
+        });
+        document.getElementById('load-game-map-btn').addEventListener('click', loadGameMapToEditor);
+        document.getElementById('save-to-game-btn').addEventListener('click', saveEditorMapToGame);
+
+        document.getElementById('expandMapBtn').addEventListener('click', () => {
+            if (gameManager) {
+                gameManager.expandMap();
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+                return;
+            }
+            if (currentMode === 'editor') {
+                switch(e.key.toLowerCase()) {
+                    case 'd': document.getElementById('draw-tool').click(); break;
+                    case 'e': document.getElementById('erase-tool').click(); break;
+                    case 'p': document.getElementById('pan-tool').click(); break;
+                    case 'g': document.getElementById('toggle-grid-btn').click(); break;
+                }
+            }
+        });
+
+        async function initializeApplication() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const initialMode = urlParams.get('mode') === 'editor' ? 'editor' : 'game';
+            if (initialMode === 'editor') {
+                switchToEditorMode();
+            } else {
+                await switchToGameMode();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeApplication);
+
+    </script>
+</body>
+</html>
