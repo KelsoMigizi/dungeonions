@@ -1,11 +1,16 @@
-body {
+html, body {
+            height: 100%;
+        }
+
+        body {
             margin: 0;
-            padding: 10px;
-            background-color: transparent;
+            padding: 0;
+            background: radial-gradient(circle at top, #1d2735, #05070d 70%);
             color: #ecf0f1;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            height: calc(100vh - 20px);
-            overflow: hidden;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         /* Mode Toggle */
@@ -42,22 +47,47 @@ body {
 
         /* Game Mode Styles */
         #game-mode {
+            flex: 1;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            padding: 40px 24px;
+            box-sizing: border-box;
             position: relative;
+            min-height: 100vh;
         }
 
         #gameContainer {
             position: relative;
-            /* background-color: #000; */ /* This was causing the black box issue */
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
-            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: min(1248px, max(688px, 96vw));
+            padding: 24px;
+            border-radius: 18px;
+            background: rgba(5, 7, 13, 0.92);
+            box-shadow: 0 0 30px rgba(0,0,0,0.55);
+            box-sizing: border-box;
+        }
+
+        #gameViewport {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #05070d;
+            border-radius: 12px;
+            overflow: hidden;
+            max-width: 100%;
+            max-height: 100%;
+            flex: 0 0 auto;
         }
 
         #gameCanvas {
             display: block;
+            width: 100%;
+            height: 100%;
+            flex-shrink: 0;
             image-rendering: pixelated;
             image-rendering: -moz-crisp-edges;
             image-rendering: -webkit-optimize-contrast;
@@ -67,47 +97,16 @@ body {
             cursor: crosshair;
         }
 
-        #gameInfo {
+        #loadingScreen {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-size: 14px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-            background: transparent;
-        }
-
-        #shop {
-            margin-top: 10px;
-        }
-
-        #shop button {
-            padding: 8px 12px;
-            background-color: #e67e22;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        #shop button:hover {
-            background-color: #d35400;
-        }
-
-        #shop button:disabled {
-            background-color: #95a5a6;
-            cursor: not-allowed;
-        }
-
-        #healthBarContainer {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.65);
+            font-size: 20px;
+            letter-spacing: 1px;
             z-index: 10;
-            background: transparent;
-            opacity: 0.2; /* Default low transparency */
-            transition: opacity 0.5s ease-in-out;
         }
 
         #roundMessage {
@@ -122,12 +121,176 @@ body {
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.5s ease-in-out;
+            z-index: 9;
+        }
+
+
+
+        #gameInfo {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: min(320px, 26vw);
+            max-height: calc(100% - 48px);
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            color: #ecf0f1;
+            z-index: 20;
+            overflow-y: auto;
+        }
+
+        .info-section {
+            background: rgba(0, 0, 0, 0.45);
+            border-radius: 10px;
+            padding: 14px 16px;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        }
+
+        .info-section h2 {
+            margin: 0 0 8px;
+            font-size: 18px;
+            letter-spacing: 0.5px;
+        }
+
+        .info-section p {
+            margin: 6px 0 0;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+
+        #class-selection {
+            padding: 14px;
+        }
+
+        #class-selection label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        #classSelect {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(236, 240, 241, 0.3);
+            background: rgba(52, 152, 219, 0.25);
+            color: #ecf0f1;
+            font-size: 15px;
+        }
+
+        #classSelect:focus {
+            outline: none;
+            border-color: #1abc9c;
+            box-shadow: 0 0 6px rgba(26, 188, 156, 0.6);
+        }
+
+        .active-class-label {
+            margin-top: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .active-class-label span {
+            color: #1abc9c;
+        }
+
+        #classStats {
+            margin-top: 8px;
+            font-size: 14px;
+            color: #bdc3c7;
+            line-height: 1.4;
+        }
+
+        #classDescription {
+            margin-top: 8px;
+            font-size: 14px;
+            color: #f9e79f;
+            line-height: 1.4;
+        }
+
+        .info-section.stats {
+            display: grid;
+            gap: 10px;
+            font-size: 15px;
+        }
+
+        .info-section .stat span {
+            font-weight: 700;
+            color: #1abc9c;
+        }
+
+        #shop button {
+            width: 100%;
+            padding: 10px 12px;
+            background-color: #e67e22;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 15px;
+            transition: background-color 0.2s;
+        }
+
+        #shop button:hover {
+            background-color: #d35400;
+        }
+
+        #shop button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        #healthBarContainer {
+            position: fixed;
+            top: 70px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.55);
+            padding: 6px 10px;
+            border-radius: 10px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+            opacity: 0.2;
+            transition: opacity 0.35s ease-in-out;
         }
 
         #healthBarContainer img {
             background: transparent;
+            display: block;
+            max-width: 260px;
         }
 
+        @media (max-width: 1100px) {
+            #gameContainer {
+                width: min(1080px, max(688px, 94vw));
+                padding: 16px;
+            }
+
+            #gameViewport {
+                width: 100%;
+                display: block;
+            }
+
+            #gameInfo {
+                position: static;
+                width: 100%;
+                max-height: none;
+                margin-top: 16px;
+            }
+
+            #healthBarContainer {
+                position: static;
+                margin: 12px auto 0;
+                display: flex;
+                justify-content: center;
+                background: rgba(0, 0, 0, 0.65);
+            }
+
+            #mode-toggle {
+                position: static;
+                margin: 20px auto 0;
+            }
+        }
         /* Editor Mode Styles */
         #editor-mode {
             display: none;
@@ -222,21 +385,6 @@ body {
         #main-canvas {
             border: 2px solid transparent;
             box-shadow: 0 0 15px rgba(0,0,0,0.5);
-        }
-
-        #loadingScreen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #000;
-            color: white;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 18px;
-            z-index: 100;
         }
 
         #load-map-input {

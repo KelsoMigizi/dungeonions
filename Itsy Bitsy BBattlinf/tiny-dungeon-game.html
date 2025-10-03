@@ -18,22 +18,37 @@
         <button type="button" id="editor-mode-btn" class="mode-button">Editor Mode</button>
     </div>
 
+    <div id="healthBarContainer"></div>
+
     <div id="game-mode">
         <div id="gameContainer">
-            <canvas id="gameCanvas"></canvas>
-            <div id="loadingScreen">Loading...</div>
-            <div id="gameInfo">
-                <div>Use WASD or Arrow Keys to move</div>
-                <div>Left-click to shoot at mouse cursor</div>
-                <div>Round: <span id="roundNumber">1</span></div>
-                <div>Score: <span id="playerScore">0</span></div>
-                <div>Enemies: <span id="enemyCount">0</span></div>
-                <div id="shop">
-                    <button id="expandMapBtn" type="button">Expand Map (Cost: 500)</button>
+            <div id="gameViewport">
+                <canvas id="gameCanvas"></canvas>
+                <div id="loadingScreen">Loading...</div>
+                <div id="gameInfo">
+                    <div class="info-section">
+                        <h2>How to Play</h2>
+                        <p>Use WASD or Arrow Keys to move</p>
+                        <p>Left-click to shoot at mouse cursor</p>
+                    </div>
+                    <div id="class-selection" class="info-section">
+                        <label for="classSelect">Choose Character</label>
+                        <select id="classSelect" aria-label="Choose player class"></select>
+                        <div class="active-class-label">Active: <span id="activeClassName">Wizard</span></div>
+                        <div id="classStats"></div>
+                        <div id="classDescription"></div>
+                    </div>
+                    <div class="info-section stats">
+                        <div class="stat">Round: <span id="roundNumber">1</span></div>
+                        <div class="stat">Score: <span id="playerScore">0</span></div>
+                        <div class="stat">Enemies: <span id="enemyCount">0</span></div>
+                    </div>
+                    <div id="shop" class="info-section">
+                        <button id="expandMapBtn" type="button">Expand Map (Cost: 500)</button>
+                    </div>
                 </div>
+                <div id="roundMessage"></div>
             </div>
-            <div id="roundMessage"></div>
-            <div id="healthBarContainer"></div>
         </div>
     </div>
 
@@ -96,7 +111,7 @@
         let tiles = [];
         let gameMapData = []; // For game mode
         let editorMapData = []; // For editor mode
-        
+
         // Game variables
         let gameManager = null;
         let atlasManager = null;
@@ -105,6 +120,75 @@
         let particleManager = null;
         let tileManager = null; // New TileManager instance
         let mapManager = null; // New MapManager instance
+        let gameCanvasElement = null;
+
+        const VIEWPORT_SCALE = 0.85;
+        const MAX_CANVAS_WIDTH = 1200;
+        const MAX_CANVAS_HEIGHT = 800;
+        const MIN_CANVAS_WIDTH = 640;
+        const MIN_CANVAS_HEIGHT = 480;
+        let resizeAnimationFrame = null;
+
+        function calculateCanvasDimensions() {
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+
+            if (!viewportWidth || !viewportHeight) {
+                return { width: 800, height: 600 };
+            }
+
+            const scaledWidth = Math.min(MAX_CANVAS_WIDTH, viewportWidth * VIEWPORT_SCALE);
+            const scaledHeight = Math.min(MAX_CANVAS_HEIGHT, viewportHeight * VIEWPORT_SCALE);
+
+            const width = Math.round(Math.max(MIN_CANVAS_WIDTH, scaledWidth));
+            const height = Math.round(Math.max(MIN_CANVAS_HEIGHT, scaledHeight));
+
+            return {
+                width,
+                height
+            };
+        }
+
+        function applyCanvasDimensions(canvas, width, height) {
+            if (!canvas || !width || !height) {
+                return;
+            }
+
+            const roundedWidth = Math.floor(width);
+            const roundedHeight = Math.floor(height);
+
+            canvas.width = roundedWidth;
+            canvas.height = roundedHeight;
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+
+            const viewport = document.getElementById('gameViewport');
+            if (viewport) {
+                viewport.style.width = `${roundedWidth}px`;
+                viewport.style.height = `${roundedHeight}px`;
+            }
+
+            if (gameManager && typeof gameManager.updateCanvasSize === 'function') {
+                gameManager.updateCanvasSize(roundedWidth, roundedHeight);
+            }
+        }
+
+        function scheduleCanvasResize() {
+            if (!gameCanvasElement) {
+                return;
+            }
+
+            if (resizeAnimationFrame) {
+                cancelAnimationFrame(resizeAnimationFrame);
+            }
+
+            resizeAnimationFrame = requestAnimationFrame(() => {
+                const { width, height } = calculateCanvasDimensions();
+                applyCanvasDimensions(gameCanvasElement, width, height);
+            });
+        }
+
+        window.addEventListener('resize', scheduleCanvasResize);
         
         // Editor variables
         let selectedTileIndex = -1;
@@ -455,6 +539,11 @@
                 return;
             }
 
+            gameCanvasElement = gameCanvas;
+
+            const { width, height } = calculateCanvasDimensions();
+            applyCanvasDimensions(gameCanvasElement, width, height);
+
             document.getElementById('loadingScreen').style.display = 'block';
 
             if (!atlasManager) atlasManager = new AtlasManager();
@@ -469,11 +558,14 @@
                     healthBarManager.loadImages(),
                     particleManager.loadParticleSampler()
                 ]);
-                
+
                 inputManager = new InputManager(gameCanvas);
                 // Pass the mapManager instance to the GameManager
-                gameManager = new GameManager(gameCanvas, atlasManager, inputManager, healthBarManager, particleManager, mapManager);
-                
+                const selectedClass = getSelectedPlayerClass();
+                gameManager = new GameManager(gameCanvas, atlasManager, inputManager, healthBarManager, particleManager, mapManager, selectedClass);
+                gameManager.updateCanvasSize(gameCanvas.width, gameCanvas.height);
+                updateClassInfoDisplay(selectedClass, { forceActiveName: true, updateSelect: true });
+
                 document.getElementById('loadingScreen').style.display = 'none';
                 
                 gameManager.lastTime = performance.now();
@@ -555,7 +647,7 @@
                 alert("Editor map is empty.");
                 return;
             }
-            
+
             const mapObject = {
                 gridCols: GRID_COLS,
                 gridRows: GRID_ROWS,
@@ -570,6 +662,106 @@
             } else {
                 alert("Game not running. Cannot save map to game.");
             }
+        }
+
+        function formatClassStats(info) {
+            if (!info) return '';
+            const stats = [
+                `HP ${info.baseHealth}`,
+                `Speed ${info.baseSpeed}`,
+                `Damage ${info.projectileDamage}`,
+                `Fire Rate ${info.projectileFireRate}ms`,
+                `Projectile Speed ${info.projectileSpeed}`
+            ];
+            return stats.join(' • ');
+        }
+
+        function updateClassInfoDisplay(classKey, options = {}) {
+            const classes = window.playerClasses || {};
+            const info = classes[classKey];
+            if (!info) return;
+
+            const { forceActiveName = false, updateSelect = false } = options;
+
+            const classStatsElement = document.getElementById('classStats');
+            const classDescriptionElement = document.getElementById('classDescription');
+            const activeClassNameElement = document.getElementById('activeClassName');
+            const classSelectElement = document.getElementById('classSelect');
+
+            if (classStatsElement) {
+                classStatsElement.textContent = formatClassStats(info);
+            }
+
+            if (classDescriptionElement) {
+                classDescriptionElement.textContent = info.description || '';
+            }
+
+            if (updateSelect && classSelectElement && classSelectElement.value !== classKey) {
+                classSelectElement.value = classKey;
+            }
+
+            if (forceActiveName || !gameManager || !gameManager.gameRunning) {
+                if (activeClassNameElement) {
+                    activeClassNameElement.textContent = info.name;
+                }
+            }
+        }
+
+        window.updateClassInfoDisplay = updateClassInfoDisplay;
+
+        function getSelectedPlayerClass() {
+            const classSelectElement = document.getElementById('classSelect');
+            const classes = window.playerClasses || {};
+            const classKeys = Object.keys(classes);
+            const defaultClass = classKeys[0] || 'wizard';
+            if (!classSelectElement) {
+                return defaultClass;
+            }
+
+            const selectedKey = classSelectElement.value;
+            if (selectedKey && classes[selectedKey]) {
+                return selectedKey;
+            }
+
+            return defaultClass;
+        }
+
+        function setupClassSelection() {
+            const classSelectElement = document.getElementById('classSelect');
+            const classes = window.playerClasses || {};
+            const classEntries = Object.entries(classes);
+
+            if (classEntries.length === 0) {
+                return;
+            }
+
+            if (!classSelectElement || classSelectElement.dataset.initialized === 'true') {
+                updateClassInfoDisplay(getSelectedPlayerClass(), { forceActiveName: true, updateSelect: true });
+                return;
+            }
+
+            classSelectElement.innerHTML = '';
+
+            classEntries.forEach(([key, info]) => {
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = info.name;
+                classSelectElement.appendChild(option);
+            });
+
+            const initialClass = getSelectedPlayerClass();
+            classSelectElement.value = initialClass;
+            updateClassInfoDisplay(initialClass, { forceActiveName: true });
+
+            classSelectElement.addEventListener('change', () => {
+                const selectedKey = getSelectedPlayerClass();
+                updateClassInfoDisplay(selectedKey);
+                if (gameManager) {
+                    gameManager.switchPlayerClass(selectedKey);
+                }
+            });
+
+            classSelectElement.dataset.initialized = 'true';
         }
 
         // --- EVENT LISTENERS ---
@@ -663,6 +855,7 @@
         });
 
         async function initializeApplication() {
+            setupClassSelection();
             const urlParams = new URLSearchParams(window.location.search);
             const initialMode = urlParams.get('mode') === 'editor' ? 'editor' : 'game';
             if (initialMode === 'editor') {
