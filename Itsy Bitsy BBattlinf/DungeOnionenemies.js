@@ -108,10 +108,8 @@ class Enemy {
     draw(ctx, atlas) {
         if (this.dead) return;
 
-        const enemyTile = atlas.getTile(`tile_${String(this.tileIndex).padStart(4, '0')}`);
-        if (enemyTile) {
-            ctx.putImageData(enemyTile, Math.round(this.x), Math.round(this.y));
-        }
+        const enemyTileName = `tile_${String(this.tileIndex).padStart(4, '0')}`;
+        atlas.drawTile(ctx, enemyTileName, Math.round(this.x), Math.round(this.y));
 
         // Draw enemy health bar
         if (this.health < this.maxHealth) {

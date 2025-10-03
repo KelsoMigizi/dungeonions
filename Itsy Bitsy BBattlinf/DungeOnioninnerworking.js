@@ -65,7 +65,16 @@ class AtlasManager {
                     }
                 }
 
-                this.tiles[`tile_${String(tileIndex).padStart(4, '0')}`] = imageData;
+                const tileCanvas = document.createElement('canvas');
+                tileCanvas.width = this.tileSize;
+                tileCanvas.height = this.tileSize;
+                const tileCtx = tileCanvas.getContext('2d');
+                tileCtx.putImageData(imageData, 0, 0);
+
+                this.tiles[`tile_${String(tileIndex).padStart(4, '0')}`] = {
+                    imageData,
+                    canvas: tileCanvas
+                };
                 tileIndex++;
             }
         }
@@ -152,7 +161,16 @@ class AtlasManager {
     }
 
     getTile(tileName) {
-        return this.tiles[tileName];
+        const tile = this.tiles[tileName];
+        return tile ? tile.imageData : null;
+    }
+
+    drawTile(ctx, tileName, dx, dy, dw = this.tileSize, dh = this.tileSize) {
+        const tile = this.tiles[tileName];
+        if (!tile || !tile.canvas) {
+            return;
+        }
+        ctx.drawImage(tile.canvas, dx, dy, dw, dh);
     }
 }
 
@@ -231,34 +249,54 @@ class InputManager {
 
 // --- CAMERA ---
 class Camera {
-    constructor(target, canvas, mapWidth, mapHeight) {
+    constructor(target, mapWidth, mapHeight) {
         this.target = target; // The object to follow (e.g., the player)
-        this.canvas = canvas;
         this.x = 0;
         this.y = 0;
         this.mapWidth = mapWidth;
         this.mapHeight = mapHeight;
+        this.viewportWidth = 0;
+        this.viewportHeight = 0;
+    }
+
+    setViewportDimensions(width, height) {
+        this.viewportWidth = Math.max(1, width);
+        this.viewportHeight = Math.max(1, height);
+        this.update();
     }
 
     update() {
-        // Center the camera on the target, with clamping to map boundaries
-        this.x = this.target.x - this.canvas.width / 2;
-        this.y = this.target.y - this.canvas.height / 2;
+        if (!this.target) {
+            return;
+        }
 
-        this.x = Math.max(0, Math.min(this.x, this.mapWidth - this.canvas.width));
-        this.y = Math.max(0, Math.min(this.y, this.mapHeight - this.canvas.height));
+        // Center the camera on the target, with clamping to map boundaries
+        const desiredX = this.target.x - this.viewportWidth / 2;
+        const desiredY = this.target.y - this.viewportHeight / 2;
+
+        const maxX = Math.max(0, this.mapWidth - this.viewportWidth);
+        const maxY = Math.max(0, this.mapHeight - this.viewportHeight);
+
+        this.x = Math.max(0, Math.min(Math.floor(desiredX), maxX));
+        this.y = Math.max(0, Math.min(Math.floor(desiredY), maxY));
+    }
+
+    setTarget(newTarget) {
+        this.target = newTarget;
+        this.update();
     }
 
     // Method to update map size if it changes
     updateMapSize(newWidth, newHeight) {
         this.mapWidth = newWidth;
         this.mapHeight = newHeight;
+        this.update();
     }
 }
 
 // --- GAME MANAGER ---
 class GameManager {
-    constructor(canvas, atlasManager, inputManager, healthBarManager, particleManager, mapManager) {
+    constructor(canvas, atlasManager, inputManager, healthBarManager, particleManager, mapManager, initialPlayerClass = 'wizard') {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.atlas = atlasManager;
@@ -280,21 +318,27 @@ class GameManager {
         this.isPaused = false;
         this.gameRunning = false;
         
-        // Set canvas size
-        this.canvas.width = 800; // Fixed canvas size
-        this.canvas.height = 600;
-        
+        this.renderTarget = document.createElement('canvas');
+        this.renderCtx = this.renderTarget.getContext('2d');
+        this.displayScale = 1;
+        this.viewportWidth = this.canvas.width || 1;
+        this.viewportHeight = this.canvas.height || 1;
+
         // Player properties
-        this.player = new Player('wizard');
+        this.player = new Player(initialPlayerClass);
+        this.currentPlayerClass = initialPlayerClass;
 
         // Camera
         this.camera = new Camera(
-            this.player, 
-            this.canvas, 
-            this.mapManager.mapWidth * this.mapManager.tileSize, 
+            this.player,
+            this.mapManager.mapWidth * this.mapManager.tileSize,
             this.mapManager.mapHeight * this.mapManager.tileSize
         );
-        
+
+        const initialWidth = this.canvas.width || 800;
+        const initialHeight = this.canvas.height || 600;
+        this.updateCanvasSize(initialWidth, initialHeight);
+
         // Projectile system
         this.projectiles = [];
         this.projectileCooldown = 0;
@@ -309,14 +353,92 @@ class GameManager {
         
         // Timing
         this.lastTime = 0;
-        
+
         // Initialize game
         this.initializeGame();
+
+        if (typeof window !== 'undefined' && typeof window.updateClassInfoDisplay === 'function') {
+            window.updateClassInfoDisplay(initialPlayerClass, { forceActiveName: true, updateSelect: true });
+        }
+    }
+
+    updateCanvasSize(width, height) {
+        if (!width || !height) {
+            return;
+        }
+
+        this.canvas.width = width;
+        this.canvas.height = height;
+
+        this.updateViewportMetrics();
+    }
+
+    updateViewportMetrics() {
+        if (!this.mapManager) {
+            return;
+        }
+
+        const mapPixelWidth = this.mapManager.mapWidth * this.mapManager.tileSize;
+        const mapPixelHeight = this.mapManager.mapHeight * this.mapManager.tileSize;
+
+        const scaleX = this.canvas.width / mapPixelWidth;
+        const scaleY = this.canvas.height / mapPixelHeight;
+
+        this.displayScale = Math.max(scaleX, scaleY);
+        if (!isFinite(this.displayScale) || this.displayScale <= 0) {
+            this.displayScale = 1;
+        }
+
+        this.viewportWidth = Math.min(mapPixelWidth, Math.round(this.canvas.width / this.displayScale));
+        this.viewportHeight = Math.min(mapPixelHeight, Math.round(this.canvas.height / this.displayScale));
+
+        this.renderTarget.width = Math.max(1, this.viewportWidth);
+        this.renderTarget.height = Math.max(1, this.viewportHeight);
+
+        if (this.camera) {
+            this.camera.setViewportDimensions(this.viewportWidth, this.viewportHeight);
+        }
     }
 
     initializeGame() {
         this.spawnInitialEnemies();
         this.gameRunning = true;
+    }
+
+    switchPlayerClass(newClassName) {
+        if (!playerClasses[newClassName]) {
+            console.warn(`Player class "${newClassName}" not found.`);
+            return false;
+        }
+
+        if (this.player.className === newClassName) {
+            return false;
+        }
+
+        const previousX = this.player.x;
+        const previousY = this.player.y;
+
+        this.player = new Player(newClassName);
+        this.player.x = previousX;
+        this.player.y = previousY;
+        this.currentPlayerClass = newClassName;
+
+        if (this.camera) {
+            this.camera.setTarget(this.player);
+        }
+
+        this.projectiles = [];
+        this.projectileCooldown = 0;
+        this.lastProjectileWasParticle = false;
+
+        this.healthBar.update(0, this.player.health, this.player.maxHealth);
+        this.updateUI();
+
+        if (typeof window !== 'undefined' && typeof window.updateClassInfoDisplay === 'function') {
+            window.updateClassInfoDisplay(newClassName, { forceActiveName: true, updateSelect: true });
+        }
+
+        return true;
     }
 
     spawnInitialEnemies() {
@@ -489,8 +611,9 @@ class GameManager {
         if (this.roundState !== 'playing') return;
         const mousePos = this.input.getMousePosition();
         // Adjust mouse position by camera offset to get world coordinates
-        const worldMouseX = mousePos.x + this.camera.x;
-        const worldMouseY = mousePos.y + this.camera.y;
+        const scale = this.displayScale || 1;
+        const worldMouseX = mousePos.x / scale + this.camera.x;
+        const worldMouseY = mousePos.y / scale + this.camera.y;
 
         const playerCenterX = this.player.x + this.mapManager.tileSize / 2;
         const playerCenterY = this.player.y + this.mapManager.tileSize / 2;
@@ -507,7 +630,7 @@ class GameManager {
                     y: playerCenterY,
                     dx: (dx / distance),
                     dy: (dy / distance),
-                    tileIndex: 115 // Potion/magic sprite
+                    tileIndex: this.player.projectileTileIndex || 115
                 });
                 this.lastProjectileWasParticle = false;
             } else {
@@ -540,6 +663,11 @@ class GameManager {
         document.getElementById('roundNumber').textContent = this.round;
         document.getElementById('playerScore').textContent = this.score;
 
+        const activeClassNameElement = document.getElementById('activeClassName');
+        if (activeClassNameElement) {
+            activeClassNameElement.textContent = this.player.classInfo.name;
+        }
+
         const expandMapBtn = document.getElementById('expandMapBtn');
         expandMapBtn.textContent = `Expand Map (Cost: ${this.mapExpansionCost})`;
         expandMapBtn.disabled = this.score < this.mapExpansionCost;
@@ -557,38 +685,47 @@ class GameManager {
     expandMap() {
         if (this.score >= this.mapExpansionCost) {
             this.score -= this.mapExpansionCost;
-            
+
             // Delegate to MapManager
             this.mapManager.expandMap();
 
             // Update camera boundaries
             this.camera.updateMapSize(
-                this.mapManager.mapWidth * this.mapManager.tileSize, 
+                this.mapManager.mapWidth * this.mapManager.tileSize,
                 this.mapManager.mapHeight * this.mapManager.tileSize
             );
 
+            this.updateViewportMetrics();
+
             // Increase cost for next expansion
             this.mapExpansionCost = Math.floor(this.mapExpansionCost * 1.8);
-            
+
             console.log(`Map expanded to ${this.mapManager.mapWidth}x${this.mapManager.mapHeight}`);
             this.updateUI();
         }
     }
 
     render() {
-        // Clear canvas
-        this.ctx.fillStyle = '#000';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        const worldCtx = this.renderCtx;
+        const targetWidth = this.renderTarget.width;
+        const targetHeight = this.renderTarget.height;
 
-        // --- WORLD SPACE DRAWING ---
-        this.ctx.save();
-        this.ctx.translate(-this.camera.x, -this.camera.y);
-        
-        // Draw map
-        const startCol = Math.floor(this.camera.x / this.mapManager.tileSize);
-        const endCol = Math.min(this.mapManager.mapWidth, startCol + Math.ceil(this.canvas.width / this.mapManager.tileSize) + 1);
-        const startRow = Math.floor(this.camera.y / this.mapManager.tileSize);
-        const endRow = Math.min(this.mapManager.mapHeight, startRow + Math.ceil(this.canvas.height / this.mapManager.tileSize) + 1);
+        // Clear offscreen target
+        worldCtx.setTransform(1, 0, 0, 1, 0, 0);
+        worldCtx.imageSmoothingEnabled = false;
+        worldCtx.fillStyle = '#000';
+        worldCtx.fillRect(0, 0, targetWidth, targetHeight);
+
+        worldCtx.save();
+        worldCtx.translate(-this.camera.x, -this.camera.y);
+
+        const tileSize = this.mapManager.tileSize;
+        const startCol = Math.max(0, Math.floor(this.camera.x / tileSize));
+        const startRow = Math.max(0, Math.floor(this.camera.y / tileSize));
+        const visibleCols = Math.ceil(targetWidth / tileSize) + 2;
+        const visibleRows = Math.ceil(targetHeight / tileSize) + 2;
+        const endCol = Math.min(this.mapManager.mapWidth, startCol + visibleCols);
+        const endRow = Math.min(this.mapManager.mapHeight, startRow + visibleRows);
 
         for (let y = startRow; y < endRow; y++) {
             for (let x = startCol; x < endCol; x++) {
@@ -596,69 +733,67 @@ class GameManager {
                     this.mapManager.gameMapData[y][x].forEach(tileIdx => {
                         if (tileIdx >= 0 && tileIdx < 132) {
                             const tileName = `tile_${String(tileIdx).padStart(4, '0')}`;
-                            const tileData = this.atlas.getTile(tileName);
-                            
-                            if (tileData) {
-                                this.ctx.putImageData(tileData, x * this.mapManager.tileSize, y * this.mapManager.tileSize);
-                            }
+                            this.atlas.drawTile(worldCtx, tileName, x * tileSize, y * tileSize, tileSize, tileSize);
                         }
                     });
                 }
             }
         }
-        
-        // Draw enemies
+
         for (let enemy of this.enemies) {
-            enemy.draw(this.ctx, this.atlas);
+            enemy.draw(worldCtx, this.atlas);
         }
-        
-        // Draw player
-        const playerTile = this.atlas.getTile(`tile_${String(this.player.tileIndex).padStart(4, '0')}`);
-        if (playerTile) {
-            this.ctx.putImageData(playerTile, Math.round(this.player.x), Math.round(this.player.y));
-        }
-        
-        // Draw projectiles (half size)
+
+        const playerTileName = `tile_${String(this.player.tileIndex).padStart(4, '0')}`;
+        this.atlas.drawTile(worldCtx, playerTileName, Math.round(this.player.x), Math.round(this.player.y), tileSize, tileSize);
+
+        const projectileSize = tileSize / 2;
         for (let proj of this.projectiles) {
-            const projTile = this.atlas.getTile(`tile_${String(proj.tileIndex).padStart(4, '0')}`);
-            if (projTile) {
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = this.mapManager.tileSize;
-                tempCanvas.height = this.mapManager.tileSize;
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.putImageData(projTile, 0, 0);
-                
-                this.ctx.drawImage(
-                    tempCanvas, 
-                    Math.round(proj.x - 4), 
-                    Math.round(proj.y - 4), 
-                    8, 
-                    8
-                );
-            }
+            const projTileName = `tile_${String(proj.tileIndex).padStart(4, '0')}`;
+            this.atlas.drawTile(
+                worldCtx,
+                projTileName,
+                proj.x - projectileSize / 2,
+                proj.y - projectileSize / 2,
+                projectileSize,
+                projectileSize
+            );
         }
-        
-        // Render particles
-        this.particleManager.render(this.ctx);
 
-        this.ctx.restore();
-        // --- END WORLD SPACE DRAWING ---
+        this.particleManager.render(worldCtx);
+        worldCtx.restore();
 
-        // --- SCREEN SPACE DRAWING (UI) ---
-        // Draw crosshair at mouse position (always on top and relative to screen)
+        // Blit scaled result to the display canvas
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.fillStyle = '#000';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.imageSmoothingEnabled = false;
+        this.ctx.drawImage(
+            this.renderTarget,
+            0,
+            0,
+            targetWidth,
+            targetHeight,
+            0,
+            0,
+            this.canvas.width,
+            this.canvas.height
+        );
+
+        // Draw crosshair at mouse position (screen space)
         const mousePos = this.input.getMousePosition();
         this.ctx.save();
         this.ctx.strokeStyle = '#ffffff';
         this.ctx.lineWidth = 1;
         this.ctx.globalAlpha = 0.7;
-        
+
         this.ctx.beginPath();
         this.ctx.moveTo(mousePos.x - 6, mousePos.y);
         this.ctx.lineTo(mousePos.x + 6, mousePos.y);
         this.ctx.moveTo(mousePos.x, mousePos.y - 6);
         this.ctx.lineTo(mousePos.x, mousePos.y + 6);
         this.ctx.stroke();
-        
+
         this.ctx.fillStyle = '#ffffff';
         this.ctx.fillRect(mousePos.x - 1, mousePos.y - 1, 2, 2);
         this.ctx.restore();
