@@ -353,6 +353,7 @@ class GameManager {
         
         // Timing
         this.lastTime = 0;
+        this.elapsedGameTime = 0;
 
         // Initialize game
         this.initializeGame();
@@ -483,6 +484,8 @@ class GameManager {
             return;
         }
 
+        this.elapsedGameTime += deltaTime;
+
         // Update player movement with collision detection
         const movement = this.input.getMovementVector();
         const deltaTimeSeconds = deltaTime / 1000;
@@ -529,7 +532,7 @@ class GameManager {
             // Check collision with enemies
             for (let enemy of this.enemies) {
                 if (!enemy.dead && this.getDistance(proj.x, proj.y, enemy.x + 8, enemy.y + 8) < 12) {
-                    enemy.takeDamage(this.player.projectileDamage);
+                    enemy.takeDamage(this.player.projectileDamage, proj.x, proj.y);
                     if (enemy.dead) {
                         this.score += 10 * this.round; // Add points for kill
                     }
@@ -741,7 +744,7 @@ class GameManager {
         }
 
         for (let enemy of this.enemies) {
-            enemy.draw(worldCtx, this.atlas);
+            enemy.draw(worldCtx, this.atlas, this.elapsedGameTime);
         }
 
         const playerTileName = `tile_${String(this.player.tileIndex).padStart(4, '0')}`;
